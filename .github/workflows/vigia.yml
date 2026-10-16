@@ -1,0 +1,52 @@
+name: vigia
+
+on:
+  workflow_dispatch:
+    inputs:
+      minutos:
+        description: "Por quantos minutos manter as APIs acordadas (máx. 350)"
+        required: false
+        default: "350"
+  # Reserva, caso o cron-job.org falhe: o agendamento do GitHub atrasa (às vezes
+  # horas), mas ainda assim cobre parte da janela.
+  schedule:
+    - cron: '50 11 * * 1-5'   # 08:50 BRT (UTC-3)
+    - cron: '40 17 * * 1-5'   # 14:40 BRT
+
+# Um novo disparo substitui o anterior: nunca ficam dois robôs pingando ao mesmo
+# tempo, e a cobertura continua sem buraco.
+concurrency:
+  group: vigia
+  cancel-in-progress: true
+
+jobs:
+  pingar:
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    steps:
+      - name: Acordar e manter acordadas as APIs
+        env:
+          URLS: >-
+            https://alugueis-api.onrender.com/healthz/
+            https://planejador-api.onrender.com/healthz/
+            https://brazai-api.onrender.com/api/v1/public/menu/atelier-gastronomico/
+          MINUTOS: ${{ github.event.inputs.minutos || '350' }}
+        run: |
+          minutos=${MINUTOS:-350}
+          if [ "$minutos" -gt 350 ]; then minutos=350; fi
+          fim=$(( $(date +%s) + minutos * 60 ))
+          echo "Janela: $minutos min, até $(date -d @$fim '+%H:%M UTC')"
+          rodada=0
+          while [ "$(date +%s)" -lt "$fim" ]; do
+            rodada=$((rodada + 1))
+            for url in $URLS; do
+              # Primeira chamada de cada rodada pode acordar o serviço (até ~60 s).
+              # --retry cobre o 503/429 que o Render devolve enquanto sobe.
+              t0=$(date +%s)
+              code=$(curl -sS -o /dev/null -w '%{http_code}' --max-time 90 \
+                      --retry 4 --retry-delay 15 --retry-all-errors "$url" || echo "ERR")
+              echo "$(date '+%H:%M:%S') rodada $rodada | $code | $(( $(date +%s) - t0 ))s | $url"
+            done
+            sleep 600
+          done
+          echo "Fim da janela."
