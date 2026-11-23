@@ -4,11 +4,14 @@ on:
   workflow_dispatch:
     inputs:
       minutos:
-        description: "Por quantos minutos manter as APIs acordadas (máx. 350)"
+        description: "Por quantos minutos manter as APIs acordadas (máx. 350; nunca passa do FIM da janela)"
         required: false
         default: "350"
-  # Reserva, caso o cron-job.org falhe: o agendamento do GitHub atrasa (às vezes
-  # horas), mas ainda assim cobre parte da janela.
+  # Reserva, caso o cron-job.org falhe. O agendamento do GitHub atrasa (às vezes
+  # horas). Por isso o robô só trabalha dentro da janela (INICIO-FIM, seg-sex):
+  # um disparo atrasado nunca estica o dia. Em 11/2026, sem essa trava, disparos
+  # atrasados recomeçavam rodadas de 6 h, as APIs ficavam acordadas até ~2h da
+  # manhã e as 750 h grátis do Render acabaram no dia 23.
   schedule:
     - cron: '50 11 * * 1-5'   # 08:50 BRT (UTC-3)
     - cron: '40 17 * * 1-5'   # 14:40 BRT
@@ -24,18 +27,36 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 360
     steps:
+      # O planejador usa /healthz/db/ (lê uma tabela) e não /healthz/ (não lê
+      # nada): assim cada ping também conta como uso do banco no Supabase, que
+      # em 11/2026 avisou que ia pausar o projeto por pouca atividade.
+      # O aluguéis mudou de endereço em 23/11/2026 (workspace próprio no Render).
       - name: Acordar e manter acordadas as APIs
         env:
           URLS: >-
-            https://alugueis-api.onrender.com/healthz/
-            https://planejador-api.onrender.com/healthz/
+            https://alugueis-api-r7zc.onrender.com/healthz/
+            https://planejador-api.onrender.com/healthz/db/
             https://brazai-api.onrender.com/api/v1/public/menu/atelier-gastronomico/
           MINUTOS: ${{ github.event.inputs.minutos || '350' }}
+          # Janela de trabalho, no horário de Brasília, de segunda a sexta.
+          FUSO: America/Sao_Paulo
+          INICIO: '08:30'
+          FIM: '18:10'
         run: |
+          export TZ="$FUSO"
+          agora=$(date +%s)
+          dia=$(date +%u)   # 1 = segunda ... 7 = domingo
+          inicio=$(date -d "today $INICIO" +%s)
+          fim_janela=$(date -d "today $FIM" +%s)
+          if [ "$dia" -gt 5 ] || [ "$agora" -lt "$inicio" ] || [ "$agora" -ge "$fim_janela" ]; then
+            echo "Fora da janela (seg-sex, $INICIO-$FIM de Brasília): nada a fazer."
+            exit 0
+          fi
           minutos=${MINUTOS:-350}
           if [ "$minutos" -gt 350 ]; then minutos=350; fi
-          fim=$(( $(date +%s) + minutos * 60 ))
-          echo "Janela: $minutos min, até $(date -d @$fim '+%H:%M UTC')"
+          fim=$(( agora + minutos * 60 ))
+          if [ "$fim" -gt "$fim_janela" ]; then fim=$fim_janela; fi
+          echo "Janela: até $(date -d @$fim '+%H:%M') de Brasília"
           rodada=0
           while [ "$(date +%s)" -lt "$fim" ]; do
             rodada=$((rodada + 1))

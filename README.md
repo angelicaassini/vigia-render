@@ -1,7 +1,7 @@
 # vigia-render
 
 Robô que **acorda e mantém acordadas** as APIs no plano grátis do Render durante a
-janela de uso (dias úteis, 9h–18h, horário de Brasília).
+janela de uso (dias úteis, 8h50–18h10, horário de Brasília).
 
 Por que existe: o Render põe o serviço grátis para dormir após 15 min sem uso e,
 quando ele está dormindo, **recusa acordá-lo para serviços de ping** como o
@@ -13,11 +13,21 @@ Como funciona:
 
 1. O cron-job.org chama a API do GitHub às **8h50** e às **14h40**
    (seg–sex), disparando o workflow `vigia.yml`.
-2. O workflow roda por até 6 h chamando as rotas leves das APIs a cada 10 min.
-3. Fora da janela, os sites mostram a tela "Acordando o servidor" (35–50 s).
+2. O workflow chama as rotas leves das APIs a cada 10 min e **para sempre às
+   18h10** de Brasília, mesmo que tenha sido disparado tarde.
+3. O agendamento do próprio GitHub (11:50 e 17:40 UTC) é só reserva. Ele costuma
+   chegar com horas de atraso; fora da janela (antes das 8h30, depois das 18h10
+   ou no fim de semana) o robô sai sem fazer nada.
+4. Fora da janela, os sites mostram a tela "Acordando o servidor" (35–50 s).
+
+**Orçamento do Render:** 750 h grátis por mês **por workspace**. Se acabar, o
+Render suspende todos os serviços grátis do workspace até o dia 1º do mês
+seguinte (aconteceu em 23/11/2026: sem a trava das 18h10, disparos atrasados
+deixavam as APIs acordadas até ~2h da manhã). Cada API acordada na janela gasta
+~210 h por mês.
 
 Rotas chamadas (todas públicas e sem dados):
 
-- https://alugueis-api.onrender.com/healthz/
-- https://planejador-api.onrender.com/healthz/
+- https://alugueis-api-r7zc.onrender.com/healthz/ (workspace próprio desde 23/11/2026)
+- https://planejador-api.onrender.com/healthz/db/ (toca no banco, para o Supabase não pausar)
 - https://brazai-api.onrender.com/api/v1/public/menu/atelier-gastronomico/
